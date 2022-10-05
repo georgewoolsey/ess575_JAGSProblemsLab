@@ -1,0 +1,305 @@
+---
+title: "ESS 575: JAGS Problems Lab"
+author: "Team England" 
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    toc: false
+    toc_depth: 3
+linkcolor: blue
+header-includes:
+  - \usepackage{caption}
+  - \captionsetup[figure]{labelformat=empty}
+editor_options: 
+  chunk_output_type: console
+knit: (function(inputFile, encoding){ 
+    out_dir <- '../';
+    rmarkdown::render(inputFile, encoding = encoding, output_file=file.path(dirname(inputFile), out_dir, 'JAGSProblemsLab_England.pdf')) 
+  })
+---
+
+Team England:
+
+  - Caroline Blommel
+  - Carolyn Coyle
+  - Bryn Crosby
+  - George Woolsey
+  
+cblommel@mail.colostate.edu, carolynm@mail.colostate.edu, brcrosby@rams.colostate.edu, george.woolsey@colostate.edu
+
+# Setup
+
+Download the R package [BayeNSF ver. 1.1](https://nthobbs50.github.io/ESS575/content/package/BayesNSF_1.1.tar.gz) to your computer.
+
+Run:
+
+`install.packages("<pathtoBayesNSF>/BayesNSF_1.1.tar.gz", repos = NULL, type = "source")`
+
+```{r setup, include=F}
+## load packages
+library(tidyverse)
+library(lubridate)
+library(viridis)
+library(scales)
+library(latex2exp)
+# visualization
+library(cowplot)
+library(kableExtra)
+# jags
+library(rjags)
+library(BayesNSF)
+library(MCMCvis)
+library(HDInterval)
+library(coda)
+
+# knit options
+knitr::opts_chunk$set(
+  echo = TRUE
+  , warning = FALSE
+  , message = FALSE
+  , fig.height = 5
+  , fig.width = 7
+)
+
+#set seed
+set.seed(10)
+```
+
+# Motivation
+
+JAGS allows you to implement models of high dimension once you master its syntax and logic. It is a great tool for ecological analysis. The problems that follow challenge you to:
+
+* Write joint distributions as a basis for writing JAGS code.
+* Write JAGS code to approximate marginal posterior distributions of derived quantities.
+* Plot model output in revealing ways.
+* Understand the effect of vague priors on parameters and on predictions of non-linear models.
+
+# Derived quantities with the logistic
+
+One of the most useful features of MCMC is its equivariance property which means that any quantity that is a function of a random variable in the MCMC algorithm becomes a random variable. Consider two quantities of interest that are functions of our estimates of the random variables $r$ and $K$:
+
+* The population size where the population growth rate is maximum, $\frac{K}{2}$
+* The rate of population growth, $\frac{dN}{dt} = r N \bigl( 1 - \frac{N}{K} \bigr)$
+
+You will now do a series of problems to estimate these quantities of interest. Some hints for the problems below:
+
+* Include expressions for each derived quantity in your JAGS code.
+* You will need to give JAGS a vector of $N$ values to plot $\frac{dN}{dt}$ vs $N$.
+* Use a JAGS object for plotting the rate of population growth.
+* Look into using the `ecdf()` function on a JAGS object. It is covered in the [JAGS Primer](https://nthobbs50.github.io/ESS575/content/lectures/JAGSPrimerMCMCVis.pdf).
+
+## Question 1 
+
+Approximate the marginal posterior distribution of the population size where the population growth rate is maximum and plot its posterior density. You may use the work you have already done in the JAGS Primer to speed this along.
+
+```{r}
+##################################################################
+# insert JAGS model code into an R script
+##################################################################
+{ # Extra bracket needed only for R markdown files - see answers
+  sink("LogisticJAGS.R") # This is the file name for the jags code
+  cat("
+  ## Logistic example for Primer
+    model{
+      # priors
+      K ~ dunif(0, 4000) # dunif(alpha = lower limit, beta = upper limit)
+      r ~ dunif (0, 2) # dunif(alpha, beta)
+      sigma ~ dunif(0, 2) # dunif(alpha, beta)
+      tau <- 1/sigma^2
+      # likelihood
+      for(i in 1:n){
+        mu[i] <- r - r/K * x[i]
+        y[i] ~ dnorm(mu[i], tau) # dnorm(mu,tau)
+      }
+      ## quantities of interest
+      # population size where the population growth rate is maximum
+      N_max_pop_grwth_rt <- K/2
+      # The rate of population growth
+      for(j in 1:length(N)){
+        pop_grwth_rt[j] <- r * N[j] * (1 - ( N[j] / K ))
+      }
+    }
+  ", fill = TRUE)
+  sink()
+}
+##################################################################
+# implement model
+##################################################################
+# SESYNCBayes which has the data frame Logistic, which we then order by PopulationSize
+# Logistic = SESYNCBayes::Logistic[order(Logistic$PopulationSize),]
+Logistic = BayesNSF::Logistic %>% dplyr::arrange(PopulationSize)
+# specify the initial conditions for the MCMC chain 
+inits = list(
+  list(K = 1500, r = .2, sigma = 1),
+  list(K = 1000, r = .15, sigma = .1),
+  list(K = 900, r = .3, sigma = .01)
+)
+# set up population size vector
+N <- seq(
+  0 # does it make sense to estimate the change in pop_grwth_rt for N<2?
+  , round(max(Logistic$PopulationSize)+sd(Logistic$PopulationSize)*2, digits = -2) # round to the nearest 100
+  , 10
+)
+# specify the data that will be used by your JAGS program
+  #the execution of JAGS is about 5 times faster on double precision than on integers.
+hey_data = list(
+  n = nrow(BayesNSF::Logistic), # n is required in the JAGS program to index the for structure
+  x = as.double(BayesNSF::Logistic$PopulationSize),
+  y = as.double(BayesNSF::Logistic$GrowthRate),
+  N = as.double(N)
+)
+# specify 3 scalars, n.adapt, n.update, and n.iter
+# n.adapt = number of iterations that JAGS will use to choose the sampler 
+  # and to assure optimum mixing of the MCMC chain
+n.adapt = 1000
+# n.update = number of iterations that will be discarded to allow the chain to 
+#   converge before iterations are stored (aka, burn-in)
+n.update = 10000
+# n.iter = number of iterations that will be stored in the 
+  # final chain as samples from the posterior distribution
+n.iter = 10000
+######################
+# Call to JAGS
+######################
+set.seed(1)
+jm = rjags::jags.model(
+  file = "LogisticJAGS.R"
+  , data = hey_data
+  , inits = inits
+  , n.chains = length(inits)
+  , n.adapt = n.adapt
+)
+stats::update(jm, n.iter = n.update)
+# save the coda object (more precisely, an mcmc.list object) to R as "zm"
+zm = rjags::coda.samples(
+  model = jm
+  , variable.names = c("K", "r", "sigma", "tau", "N_max_pop_grwth_rt", "pop_grwth_rt")
+  , n.iter = n.iter
+  , n.thin = 1
+)
+#####################
+# check output
+#####################
+# summary
+MCMCvis::MCMCsummary(zm, params = c("K", "r", "sigma", "tau", "N_max_pop_grwth_rt"))
+# chain 1 first 6 iterations and specific columns
+zm[[1]][1:6, c("K", "r", "sigma", "tau", "N_max_pop_grwth_rt")]
+# The rate of population growth
+MCMCvis::MCMCpstr(zm, params = "pop_grwth_rt", func = function(x) quantile(x, c(0.025, 0.5, 0.975))) %>% 
+  as.data.frame() %>% 
+  dplyr::bind_cols(N = N) %>% 
+  dplyr::slice_head(n = 6)
+```
+
+
+```{r, include=FALSE}
+# the marginal posterior density of N at the maximum population growth rate
+MCMCvis::MCMCchains(zm, params = c("N_max_pop_grwth_rt")) %>% 
+  as.data.frame() %>% 
+  # plot
+  ggplot(data = ., mapping = aes(x = N_max_pop_grwth_rt)) +
+  geom_density(
+    aes(y = ..density..)
+    , linetype = 2
+    , lwd = 1.2
+    , color = "navy"
+  ) +
+  xlab(latex2exp::TeX("$N$ at maximum population growth rate")) +
+  ylab("Density") +
+  labs(
+    title = "Population size where the population growth rate is maximum"
+  ) +
+  theme_bw()
+```
+
+## Question 2
+
+Plot the median growth rate of the *population* (not the per-capita rate) rate and a 95% highest posterior density interval as a function of $N$. What does this curve tell you about the difficulty of sustaining harvest of populations?
+
+```{r}
+dplyr::bind_cols(
+  N = N
+  , median_pop_grwth_rt = MCMCvis::MCMCpstr(zm, params = "pop_grwth_rt", func = median) %>% unlist()
+  , MCMCvis::MCMCpstr(zm, params = "pop_grwth_rt", func = function(x) HDInterval::hdi(x, credMass = 0.95)) %>% as.data.frame()
+) %>% 
+# plot
+ggplot(data = .) +
+  geom_line(mapping  = aes(x = N, y = median_pop_grwth_rt), color = "black", lwd = 1.1) +
+  geom_line(mapping  = aes(x = N, y = pop_grwth_rt.upper), color = "royalblue", lwd = 1, linetype = "dashed") +
+  geom_line(mapping  = aes(x = N, y = pop_grwth_rt.lower), color = "royalblue", lwd = 1, linetype = "dashed") +
+  scale_y_continuous(breaks = scales::extended_breaks(n=10)) +
+  scale_x_continuous(breaks = scales::extended_breaks(n=10), labels = scales::comma) +
+  xlab("Population Size") +
+  ylab("Population Growth Rate") +
+  labs(
+    title = "Population growth rate as a function of population size"
+    , subtitle = "*Median of the model predictions and 95% highest posterior density intervals shown"
+  ) +
+  theme_bw() +
+  theme(
+    plot.subtitle = element_text(size = 9)
+  )
+  
+
+```
+
+
+## Question 3
+
+What is the probability that the intrinsic rate of increase $(r)$ exceeds 0.22? What is the probability that $r$ falls between 0.18 and 0.22?
+
+```{r}
+# access data from MCMC list
+temp_df <- MCMCvis::MCMCchains(zm, params = c("r")) %>% as.data.frame()
+# probability that the intrinsic rate of increase $(r)$ exceeds 0.22
+temp_1 <- 1 - stats::ecdf(temp_df$r)(0.22)
+# probability that $r$ falls between 0.18 and 0.22
+temp_2 <- stats::ecdf(temp_df$r)(0.22) - stats::ecdf(temp_df$r)(0.18)
+```
+
+\textcolor{violet}{The probability that the intrinsic rate of increase $(r)$ exceeds 0.22 is: }`r scales::percent(temp_1, accuracy = 0.1)`
+
+\textcolor{violet}{The probability that $r$ falls between 0.18 and 0.22 is: }`r scales::percent(temp_2, accuracy = 0.1)`
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, include=FALSE}
+remove(list = ls()[grep("temp_",ls())])
+gc()
+```
+
+# Lizards on islands
+
+This problem is courtesy of McCarthy (2007). Polis et al. (1998) analyzed the probability of occupancy of islands $p$ by lizards as a function of the ratio of the islands’ perimeter to area ratios. The data from this investigation are available in the data frame `BayesNSF::IslandsLizards`. The response data, as you will see, are 0 or 1: 0 if there were no lizards found on the island, 1 if there were 1 or more lizards observed. You are heroically assuming that if you fail to find a lizard, none are present on the island.
+
+# Question 1
+
+Construct a simple Bayesian model that represents the probability of occupancy as:
+
+$$
+g(a, b, x_i) = \frac{e^{a + b x_i}}{1 + e^{a + b x_i}}
+$$
+
+where $x_i$ is the perimeter to area ratio of the $i^{th}$ island. So, now that you have the deterministic model, the challenge is to choose the proper likelihood to link the data to the model. How do the data arise? What likelihood function is needed to represent the data?
+
+\textcolor{violet}{The data -- occupancy of islands $p$ by lizards -- arise from a ${\sf Bernoulli}$ distribution with the random variable $p$ taking on the values 0 or 1. The likelihood function for the ${\sf Bernoulli}$ distribution is the inverse logit with the form:}
+
+$$
+\textrm{inverse logit}(\theta_i) = \frac{\exp{\bigl(\theta \bigr)}}{1 + \exp \bigl(\theta \bigr)}
+$$
+
+# Question 2
+
+Write the expression for the posterior and joint distribution of the parameters and data, as we have learned how to do in lecture. Use the joint distribution as a basis for JAGS code needed to estimate the posterior distribution of $a$ and $b$. Assume vague priors on the intercept and slope, e.g., $\beta_0 \sim {\sf normal}(0, 10000), \; \beta_1 \sim {\sf normal}(0, 10000)$. Draw a DAG if you like. There doesn’t appear to be any variance term in this model. How can that be?
+
+$$
+\bigl[a, b \mid \textbf{y} \bigr] \propto \prod_{i = 1}^{n} {\sf Bernoulli} \bigl( y_{i} \mid g(a, b, x_i) \bigr) \; {\sf normal} \bigr(a \mid 0, 10000 \bigl) \; {\sf Bernoulli} \bigr(b \mid 0, 10000 \bigr)
+$$
+$$
+p = g(a,b,x_i) = \textrm{inverse logit} \bigl(a + b x_{i} \bigr) = \frac{\exp{\bigl(a + b x_{i} \bigr)}}{1 + \exp \bigl(a + b x_{i} \bigr)}
+$$
+
+```{r}
+# in progress
+
+```
+
