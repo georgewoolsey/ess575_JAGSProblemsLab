@@ -122,7 +122,7 @@ Approximate the marginal posterior distribution of the population size where the
   ", fill = TRUE)
   sink()
 }
-##################################################################
+################################################################
 # implement model
 ##################################################################
 # SESYNCBayes which has the data frame Logistic, which we then order by PopulationSize
@@ -137,7 +137,11 @@ inits = list(
 # set up population size vector
 N <- seq(
   0 # does it make sense to estimate the change in pop_grwth_rt for N<2?
-  , round(max(Logistic$PopulationSize)+sd(Logistic$PopulationSize)*2, digits = -2) # round to the nearest 100
+  , round(
+      max(Logistic$PopulationSize)
+        + sd(Logistic$PopulationSize)*2
+      , digits = -2 # round to the nearest 100
+    ) 
   , 10
 )
 # specify the data that will be used by your JAGS program
@@ -271,7 +275,7 @@ gc()
 
 This problem is courtesy of McCarthy (2007). Polis et al. (1998) analyzed the probability of occupancy of islands $p$ by lizards as a function of the ratio of the islands’ perimeter to area ratios. The data from this investigation are available in the data frame `BayesNSF::IslandsLizards`. The response data, as you will see, are 0 or 1: 0 if there were no lizards found on the island, 1 if there were 1 or more lizards observed. You are heroically assuming that if you fail to find a lizard, none are present on the island.
 
-# Question 1
+## Question 1
 
 Construct a simple Bayesian model that represents the probability of occupancy as:
 
@@ -281,25 +285,43 @@ $$
 
 where $x_i$ is the perimeter to area ratio of the $i^{th}$ island. So, now that you have the deterministic model, the challenge is to choose the proper likelihood to link the data to the model. How do the data arise? What likelihood function is needed to represent the data?
 
-\textcolor{violet}{The data -- occupancy of islands $p$ by lizards -- arise from a ${\sf Bernoulli}$ distribution with the random variable $p$ taking on the values 0 or 1. The likelihood function for the ${\sf Bernoulli}$ distribution is the inverse logit with the form:}
+\textcolor{violet}{The data -- occupancy of islands $p$ by lizards -- arise from a ${\sf Bernoulli}$ distribution with the random variable $p$ taking on the values 0 or 1. The likelihood function for the ${\sf Bernoulli}$ distribution is the inverse logit (i.e. the logistic function) with the form:}
 
 $$
-\textrm{inverse logit}(\theta_i) = \frac{\exp{\bigl(\theta \bigr)}}{1 + \exp \bigl(\theta \bigr)}
+\textrm{inverse logit}(\phi_i) = \frac{\exp{\bigl(\phi \bigr)}}{1 + \exp \bigl(\phi \bigr)}
 $$
 
-# Question 2
+## Question 2
 
 Write the expression for the posterior and joint distribution of the parameters and data, as we have learned how to do in lecture. Use the joint distribution as a basis for JAGS code needed to estimate the posterior distribution of $a$ and $b$. Assume vague priors on the intercept and slope, e.g., $\beta_0 \sim {\sf normal}(0, 10000), \; \beta_1 \sim {\sf normal}(0, 10000)$. Draw a DAG if you like. There doesn’t appear to be any variance term in this model. How can that be?
 
 $$
-\bigl[a, b \mid \textbf{y} \bigr] \propto \prod_{i = 1}^{n} {\sf Bernoulli} \bigl( y_{i} \mid g(a, b, x_i) \bigr) \; {\sf normal} \bigr(a \mid 0, 10000 \bigl) \; {\sf Bernoulli} \bigr(b \mid 0, 10000 \bigr)
+\bigl[a, b \mid \textbf{y} \bigr] \propto \prod_{i = 1}^{n} {\sf Bernoulli} \bigl( y_{i} \mid g(a, b, x_i) \bigr) \; {\sf normal} \bigr(a \mid 0, 10000 \bigl) \; {\sf normal} \bigr(b \mid 0, 10000 \bigr)
 $$
 $$
 p = g(a,b,x_i) = \textrm{inverse logit} \bigl(a + b x_{i} \bigr) = \frac{\exp{\bigl(a + b x_{i} \bigr)}}{1 + \exp \bigl(a + b x_{i} \bigr)}
 $$
 
+There doesn’t appear to be any variance term in this model. How can that be?
+
+\textcolor{violet}{The ${\sf Bernoulli}$ distribution is the discrete probability distribution of a random variable which takes the value 1 with probability $p$ and the value 0 with probability $q=1-p$ and a variance $\sigma^2 = pq = p(1-p)$. The model above includes $p$ which can be utilized to determine the variance $\sigma^2$.}
+
+## Question 3
+
+Using JAGS, run MCMC for three chains for the parameters $a$ and $b$ and the derived quantity $p_i$, the probability of occupancy. JAGS has a function, `ilogit` for the inverse logit that you might find helpful. Selecting initial conditions can be a bit tricky with the type of likelihood you will use here. You may get the message:
+
+*\textcolor{red}{Error in jags.model("IslandsJags.R", data = data, inits, n.chains = length(inits), : Error in node y[4] Observed node inconsistent with unobserved parents at initialization.}*
+
+To overcome this, try the following:
+
+* Standardize the the perimeter to area ratio covariate using the `scale` function in R, which subtracts the mean of the data from every data point and divides by the standard deviation of the data. You want the default arguments for `center` and `scale` in this function.
+* Choose initial values for $a$ and $b$ so that $inverse logit(a+b \, \cdot \, standardized(x_i))$ is between 0.01 and 0.99.
+
 ```{r}
-# in progress
 
 ```
+
+
+
+\textcolor{violet}{We can be 95% confident that the true value of the random variable falls between the upper and lower limits.}
 
