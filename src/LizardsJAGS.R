@@ -5,8 +5,8 @@
     b ~ dnorm(0, 10000)
     # likelihood
     for (i in 1:n) {
-      # p[i] <- ilogit(a + b*x[i])
-      logit(p[i]) <- a + b*x[i] 
+      p[i] <- ilogit(a + b*x[i])
+      # logit(p[i]) <- a + b*x[i] ??? which one
       y[i] ~ dbern(p[i])
     }
     ## quantities of interest

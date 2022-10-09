@@ -485,7 +485,6 @@ Plot the data as points. Overlay a line plot of the median and 95% highest poste
   # so you need to make predictions using standardized values in the sequence you create
 perim_area <- seq(1, 60, 0.25)
 perim_area_z <- (perim_area - mean(data_df$perimeterAreaRatio)) / sd(data_df$perimeterAreaRatio)
-
 ```
 
 ### JAGS Model
