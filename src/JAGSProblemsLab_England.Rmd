@@ -165,7 +165,6 @@ n.iter = 10000
 ######################
 # Call to JAGS
 ######################
-set.seed(1)
 jm = rjags::jags.model(
   file = "LogisticJAGS.R"
   , data = hey_data
@@ -304,7 +303,7 @@ $$
 
 There doesn’t appear to be any variance term in this model. How can that be?
 
-\textcolor{violet}{The ${\sf Bernoulli}$ distribution is the discrete probability distribution of a random variable which takes the value 1 with probability $p$ and the value 0 with probability $q=1-p$ and a variance $\sigma^2 = pq = p(1-p)$. The model above includes $p$ which can be utilized to determine the variance $\sigma^2$.}
+\textcolor{violet}{The ${\sf Bernoulli}$ distribution is the discrete probability distribution of a random variable which takes the value 1 with probability $p$ and the value 0 with probability $q=1-p$ and variance $\sigma^2 = pq = p(1-p)$. The model above includes $p$ which determines the variance $\sigma^2$.}
 
 ## Question 3
 
@@ -317,11 +316,343 @@ To overcome this, try the following:
 * Standardize the the perimeter to area ratio covariate using the `scale` function in R, which subtracts the mean of the data from every data point and divides by the standard deviation of the data. You want the default arguments for `center` and `scale` in this function.
 * Choose initial values for $a$ and $b$ so that $inverse logit(a+b \, \cdot \, standardized(x_i))$ is between 0.01 and 0.99.
 
+### Set up the data
+
 ```{r}
+data_df <- BayesNSF::IslandsLizards %>%
+    # sort
+    dplyr::arrange(desc(perimeterAreaRatio)) %>% 
+    # standardize
+    dplyr::mutate(
+      perim_area_ratio_z = scale(perimeterAreaRatio)
+    )
+
+# Choose initial values for $a$ and $b$ so that $inverse logit(a+b \, \cdot \, standardized(x_i))$ is between 0.01 and 0.99.
+  inv_logit_fn <- function(a, b, x){
+    exp(a + b*x) / (1 + exp(a + b*x))
+  }
+  
+  a <- rnorm(10000, mean = 0, 20)
+  b <- rnorm(10000, mean = 0, 20)
+  y <- numeric(length(a))
+  for(i in 1:length(a)){
+    y[i] <- inv_logit_fn(a[i], b[i]
+        , as.numeric((dplyr::slice_sample(data_df, n=1))$perim_area_ratio_z)
+    )
+  }
+  temp_dta <- data.frame(
+      a = a
+      , b = b
+      , y = y
+    ) %>% 
+    dplyr::filter(
+      y >= 0.01 & y <= 0.99
+    )
+  a_min <- floor(quantile(temp_dta$a, probs = 0.4)) %>% as.numeric()
+  b_min <- floor(quantile(temp_dta$b, probs = 0.4)) %>% as.numeric()
+  a_max <- ceiling(quantile(temp_dta$a, probs = 0.6)) %>% as.numeric()
+  b_max <- ceiling(quantile(temp_dta$b, probs = 0.6)) %>% as.numeric()
+  
+  remove(temp_dta)
+```
+
+### JAGS Model
+
+```{r, eval=FALSE}
+## JAGS Model
+model{
+  # priors
+  a ~ dnorm(0, 10000)
+  b ~ dnorm(0, 10000)
+  # likelihood
+  for (i in 1:n) {
+    p[i] <- ilogit(a + b*x[i])
+    # logit(p[i]) <- a + b*x[i] ??? which one
+    y[i] ~ dbern(p[i])
+  }
+}
+```
+
+### Implement JAGS Model
+
+```{r}
+##################################################################
+# insert JAGS model code into an R script
+##################################################################
+{ # Extra bracket needed only for R markdown files - see answers
+  sink("LizardsJAGS.R") # This is the file name for the jags code
+  cat("
+  model{
+    # priors
+    a ~ dnorm(0, 10000)
+    b ~ dnorm(0, 10000)
+    # likelihood
+    for (i in 1:n) {
+      p[i] <- ilogit(a + b*x[i])
+      # logit(p[i]) <- a + b*x[i] ??? which one
+      y[i] ~ dbern(p[i])
+    }
+  }
+  ", fill = TRUE)
+  sink()
+}
+################################################################
+# implement model
+##################################################################
+# specify the initial conditions for the MCMC chain 
+inits = list(
+  list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+  , list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+  , list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+)
+# specify the data that will be used by your JAGS program
+  #the execution of JAGS is about 5 times faster on double precision than on integers.
+hey_data = list(
+  n = nrow(data_df) # n is required in the JAGS program to index the for structure
+  , x = as.double(data_df$perim_area_ratio_z)
+  , y = as.double(data_df$presence)
+)
+# specify 3 scalars, n.adapt, n.update, and n.iter
+# n.adapt = number of iterations that JAGS will use to choose the sampler 
+  # and to assure optimum mixing of the MCMC chain
+n.adapt = 1000
+# n.update = number of iterations that will be discarded to allow the chain to 
+#   converge before iterations are stored (aka, burn-in)
+n.update = 10000
+# n.iter = number of iterations that will be stored in the 
+  # final chain as samples from the posterior distribution
+n.iter = 10000
+######################
+# Call to JAGS
+######################
+jm = rjags::jags.model(
+  file = "LizardsJAGS.R"
+  , data = hey_data
+  , inits = inits
+  , n.chains = length(inits)
+  , n.adapt = n.adapt
+)
+stats::update(jm, n.iter = n.update)
+# save the coda object (more precisely, an mcmc.list object) to R as "zm"
+zm = rjags::coda.samples(
+  model = jm
+  , variable.names = c("a", "b")
+  # , variable.names = c("a", "b", "p")
+  , n.iter = n.iter
+  , n.thin = 1
+)
+#####################
+# check output
+#####################
+# chain 1 first 6 iterations and specific columns
+zm[[1]][1:6, c("a", "b")]
+```
+
+## Question 4
+
+Do a summary table, a plot of the marginal posterior densities of the posterior density and a trace of the chain for parameters $a$ and $b$. Does the trace indicate convergence? How can you tell? Use Gelman and Heidel diagnostics to check for convergence.
+
+```{r}
+# summary
+MCMCvis::MCMCsummary(zm, params = c("a", "b")) %>% 
+    kableExtra::kable(
+    caption = "Summary of simulations for parameters a and b"
+    , digits = 5
+  ) %>% 
+  kableExtra::kable_styling(font_size = 11) %>% 
+  kableExtra::column_spec(1, bold = TRUE, width = "18em") %>% 
+  kableExtra::kable_styling(latex_options = "HOLD_position")
+# trace plot
+MCMCvis::MCMCtrace(zm, params = c("a", "b"), pdf = FALSE)
+# Gelman-Rubin diagnostic
+coda::gelman.diag(zm)
+# Heidelberger and Welch diagnostic
+coda::heidel.diag(zm)
+```
+
+
+\textcolor{violet}{Based on the trace plot and the Gelman-Ruban convergence diagnostic the chains have converged. This can be seen visually in the trace plot and the Gelman-Ruban convergance diagnostic value of `1` the indicates convergence. Values substantially above 1 would indicate lack of convergence.}
+
+## Question 5
+
+Plot the data as points. Overlay a line plot of the median and 95% highest posterior density intervals of the predicted probability of occurrence as a function of island perimeter to area ratios ranging from 1-60. Hint–create a vector of 1-60 in R, and use it as $x$ values for an equation making predictions in your JAGS code. The curve is jumpy if you simply plot the predictions at the island perimeter to area data points. Remember, however, that the x’s have been standardized to fit the coefficients, so you need to make predictions using standardized values in the sequence you create. You may plot these predictions against the un-standardized perimeter to area ratios, a plot that is more easily interpreted than plotting against the standardized ratios.
+
+### Data prep
+
+```{r}
+# create a vector of 1-60...
+  # the x’s have been standardized to fit the coefficients...
+  # so you need to make predictions using standardized values in the sequence you create
+perim_area <- seq(1, 60, 0.25)
+perim_area_z <- (perim_area - mean(data_df$perimeterAreaRatio)) / sd(data_df$perimeterAreaRatio)
+
+```
+
+### JAGS Model
+
+```{r, eval=FALSE}
+## JAGS Model
+model{
+  # priors
+  a ~ dnorm(0, 10000)
+  b ~ dnorm(0, 10000)
+  # likelihood
+  for (i in 1:n) {
+    p[i] <- ilogit(a + b*x[i])
+    # logit(p[i]) <- a + b*x[i] ??? which one
+    y[i] ~ dbern(p[i])
+  }
+  ## quantities of interest
+    # The predicted probability of occupancy
+    for(j in 1:length(perim_area_z)){
+      p_est[j] <- ilogit(a + b*perim_area_z[j])
+    }
+
+}
+```
+
+### Implement JAGS Model
+
+```{r}
+##################################################################
+# insert JAGS model code into an R script
+##################################################################
+{ # Extra bracket needed only for R markdown files - see answers
+  sink("LizardsJAGS.R") # This is the file name for the jags code
+  cat("
+  model{
+    # priors
+    a ~ dnorm(0, 10000)
+    b ~ dnorm(0, 10000)
+    # likelihood
+    for (i in 1:n) {
+      p[i] <- ilogit(a + b*x[i])
+      # logit(p[i]) <- a + b*x[i] ??? which one
+      y[i] ~ dbern(p[i])
+    }
+    ## quantities of interest
+      # The predicted probability of occupancy
+      for(j in 1:length(perim_area_z)){
+        p_est[j] <- ilogit(a + b*perim_area_z[j])
+      }
+  
+  }
+  ", fill = TRUE)
+  sink()
+}
+################################################################
+# implement model
+##################################################################
+# specify the initial conditions for the MCMC chain 
+inits = list(
+  list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+  , list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+  , list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+)
+# specify the data that will be used by your JAGS program
+  #the execution of JAGS is about 5 times faster on double precision than on integers.
+hey_data = list(
+  n = nrow(data_df) # n is required in the JAGS program to index the for structure
+  , x = as.double(data_df$perim_area_ratio_z)
+  , y = as.double(data_df$presence)
+  , perim_area_z = as.double(perim_area_z)
+)
+# specify 3 scalars, n.adapt, n.update, and n.iter
+# n.adapt = number of iterations that JAGS will use to choose the sampler 
+  # and to assure optimum mixing of the MCMC chain
+n.adapt = 1000
+# n.update = number of iterations that will be discarded to allow the chain to 
+#   converge before iterations are stored (aka, burn-in)
+n.update = 10000
+# n.iter = number of iterations that will be stored in the 
+  # final chain as samples from the posterior distribution
+n.iter = 10000
+######################
+# Call to JAGS
+######################
+jm = rjags::jags.model(
+  file = "LizardsJAGS.R"
+  , data = hey_data
+  , inits = inits
+  , n.chains = length(inits)
+  , n.adapt = n.adapt
+)
+stats::update(jm, n.iter = n.update)
+# save the coda object (more precisely, an mcmc.list object) to R as "zm"
+zm = rjags::coda.samples(
+  model = jm
+  , variable.names = c("a", "b", "p_est")
+  , n.iter = n.iter
+  , n.thin = 1
+)
+#####################
+# check output
+#####################
+# summary
+MCMCvis::MCMCsummary(zm, params = c("a", "b"))
+# chain 1 first 6 iterations and specific columns
+zm[[1]][1:6, c("a", "b")]
+# The rate of population growth
+MCMCvis::MCMCpstr(zm, params = "p_est", func = function(x) quantile(x, c(0.025, 0.5, 0.975))) %>% 
+  as.data.frame() %>% 
+  dplyr::bind_cols(perim_area_z = perim_area_z) %>% 
+  dplyr::slice_head(n = 6)
+
+```
+
+### Plot
+Plot the data as points. Overlay a line plot of the median and 95% highest posterior density intervals of the predicted probability of occurrence as a function of island perimeter to area ratios ranging from 1-60.
+
+```{r}
+dplyr::bind_cols(
+  perim_area = perim_area
+  , median_p_est = MCMCvis::MCMCpstr(zm, params = "p_est", func = median) %>% unlist()
+  , MCMCvis::MCMCpstr(zm, params = "p_est", func = function(x) HDInterval::hdi(x, credMass = 0.95)) %>% as.data.frame()
+) %>% 
+# plot
+ggplot(data = .) +
+  geom_line(mapping  = aes(x = perim_area, y = median_p_est), color = "black", lwd = 1.1) +
+  geom_line(mapping  = aes(x = perim_area, y = p_est.upper), color = "royalblue", lwd = 1, linetype = "dashed") +
+  geom_line(mapping  = aes(x = perim_area, y = p_est.lower), color = "royalblue", lwd = 1, linetype = "dashed") +
+  # add sample data
+  geom_point(
+    data = data_df
+    , mapping = aes(x = perimeterAreaRatio, y = presence)
+    , color = "gray50"
+  ) +
+  scale_y_continuous(breaks = scales::extended_breaks(n=10)) +
+  scale_x_continuous(breaks = scales::extended_breaks(n=10), labels = scales::comma) +
+  xlab("Perimeter Area ratio") +
+  ylab("Occupancy Probability") +
+  labs(
+    title = "Population growth rate as a function of population size"
+    , subtitle = "*Median of the model predictions and 95% highest posterior density intervals shown"
+  ) +
+  theme_bw() +
+  theme(
+    plot.subtitle = element_text(size = 9)
+  )
+  
 
 ```
 
 
+
+## Question 6
+
+Assume you are interested in 2 islands, one that has a perimeter to area ratio of 10, the other that has a perimeter to area ratio of 20. What is the 95% highest posterior density interval on the difference in the probability of occupancy of the two islands based on the analysis you did above? What is the probability that the difference exceeds 0? Remember that the data are standardized when you do this computation.
+
+```{r}
+
+```
+
+## Question 7
+
+What fundamentally important source of error are we sweeping under the rug in all of these fancy calculations? What are the consequences of failing to consider this error for our estimates? Do you have some ideas about how we might cope with this problem?
+
+```{r}
+
+```
 
 \textcolor{violet}{We can be 95% confident that the true value of the random variable falls between the upper and lower limits.}
 
