@@ -1,8 +1,8 @@
 
   model{
     # priors
-    a ~ dnorm(0, 10000)
-    b ~ dnorm(0, 10000)
+    a ~ dnorm(0, 0.00001)
+    b ~ dnorm(0, 0.00001)
     # likelihood
     for (i in 1:n) {
       p[i] <- ilogit(a + b*x[i])

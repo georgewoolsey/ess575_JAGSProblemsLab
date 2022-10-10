@@ -324,7 +324,7 @@ data_df <- BayesNSF::IslandsLizards %>%
     dplyr::arrange(desc(perimeterAreaRatio)) %>% 
     # standardize
     dplyr::mutate(
-      perim_area_ratio_z = scale(perimeterAreaRatio)
+      perim_area_ratio_z = as.numeric(scale(perimeterAreaRatio))
     )
 
 # Choose initial values for $a$ and $b$ so that $inverse logit(a+b \, \cdot \, standardized(x_i))$ is between 0.01 and 0.99.
@@ -337,7 +337,7 @@ data_df <- BayesNSF::IslandsLizards %>%
   y <- numeric(length(a))
   for(i in 1:length(a)){
     y[i] <- inv_logit_fn(a[i], b[i]
-        , as.numeric((dplyr::slice_sample(data_df, n=1))$perim_area_ratio_z)
+        , (dplyr::slice_sample(data_df, n=1))$perim_area_ratio_z
     )
   }
   temp_dta <- data.frame(
@@ -362,8 +362,8 @@ data_df <- BayesNSF::IslandsLizards %>%
 ## JAGS Model
 model{
   # priors
-  a ~ dnorm(0, 10000)
-  b ~ dnorm(0, 10000)
+  a ~ dnorm(0, 0.00001)
+  b ~ dnorm(0, 0.00001)
   # likelihood
   for (i in 1:n) {
     p[i] <- ilogit(a + b*x[i])
@@ -384,8 +384,8 @@ model{
   cat("
   model{
     # priors
-    a ~ dnorm(0, 10000)
-    b ~ dnorm(0, 10000)
+    a ~ dnorm(0, 0.00001)
+    b ~ dnorm(0, 0.00001)
     # likelihood
     for (i in 1:n) {
       p[i] <- ilogit(a + b*x[i])
@@ -412,6 +412,7 @@ hey_data = list(
   , x = as.double(data_df$perim_area_ratio_z)
   , y = as.double(data_df$presence)
 )
+
 # specify 3 scalars, n.adapt, n.update, and n.iter
 # n.adapt = number of iterations that JAGS will use to choose the sampler 
   # and to assure optimum mixing of the MCMC chain
@@ -493,8 +494,8 @@ perim_area_z <- (perim_area - mean(data_df$perimeterAreaRatio)) / sd(data_df$per
 ## JAGS Model
 model{
   # priors
-  a ~ dnorm(0, 10000)
-  b ~ dnorm(0, 10000)
+  a ~ dnorm(0, 0.00001)
+  b ~ dnorm(0, 0.00001)
   # likelihood
   for (i in 1:n) {
     p[i] <- ilogit(a + b*x[i])
@@ -521,8 +522,8 @@ model{
   cat("
   model{
     # priors
-    a ~ dnorm(0, 10000)
-    b ~ dnorm(0, 10000)
+    a ~ dnorm(0, 0.00001)
+    b ~ dnorm(0, 0.00001)
     # likelihood
     for (i in 1:n) {
       p[i] <- ilogit(a + b*x[i])
@@ -621,10 +622,10 @@ ggplot(data = .) +
   ) +
   scale_y_continuous(breaks = scales::extended_breaks(n=10)) +
   scale_x_continuous(breaks = scales::extended_breaks(n=10), labels = scales::comma) +
-  xlab("Perimeter Area ratio") +
+  xlab("Perimeter-Area Ratio") +
   ylab("Occupancy Probability") +
   labs(
-    title = "Population growth rate as a function of population size"
+    title = "Occupancy probability as a function of perimeter-area ratio"
     , subtitle = "*Median of the model predictions and 95% highest posterior density intervals shown"
   ) +
   theme_bw() +
