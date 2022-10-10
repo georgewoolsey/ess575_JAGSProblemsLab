@@ -362,12 +362,11 @@ data_df <- BayesNSF::IslandsLizards %>%
 ## JAGS Model
 model{
   # priors
-  a ~ dnorm(0, 0.00001)
-  b ~ dnorm(0, 0.00001)
+  a ~ dnorm(0,1E-6)
+  b ~ dnorm(0,1E-6)
   # likelihood
   for (i in 1:n) {
     p[i] <- ilogit(a + b*x[i])
-    # logit(p[i]) <- a + b*x[i] ??? which one
     y[i] ~ dbern(p[i])
   }
 }
@@ -384,12 +383,11 @@ model{
   cat("
   model{
     # priors
-    a ~ dnorm(0, 0.00001)
-    b ~ dnorm(0, 0.00001)
+    a ~ dnorm(0,1E-6)
+    b ~ dnorm(0,1E-6)
     # likelihood
     for (i in 1:n) {
       p[i] <- ilogit(a + b*x[i])
-      # logit(p[i]) <- a + b*x[i] ??? which one
       y[i] ~ dbern(p[i])
     }
   }
@@ -494,12 +492,11 @@ perim_area_z <- (perim_area - mean(data_df$perimeterAreaRatio)) / sd(data_df$per
 ## JAGS Model
 model{
   # priors
-  a ~ dnorm(0, 0.00001)
-  b ~ dnorm(0, 0.00001)
+  a ~ dnorm(0,1E-6)
+  b ~ dnorm(0,1E-6)
   # likelihood
   for (i in 1:n) {
     p[i] <- ilogit(a + b*x[i])
-    # logit(p[i]) <- a + b*x[i] ??? which one
     y[i] ~ dbern(p[i])
   }
   ## quantities of interest
@@ -522,12 +519,11 @@ model{
   cat("
   model{
     # priors
-    a ~ dnorm(0, 0.00001)
-    b ~ dnorm(0, 0.00001)
+    a ~ dnorm(0,1E-6)
+    b ~ dnorm(0,1E-6)
     # likelihood
     for (i in 1:n) {
       p[i] <- ilogit(a + b*x[i])
-      # logit(p[i]) <- a + b*x[i] ??? which one
       y[i] ~ dbern(p[i])
     }
     ## quantities of interest
@@ -592,7 +588,7 @@ zm = rjags::coda.samples(
 MCMCvis::MCMCsummary(zm, params = c("a", "b"))
 # chain 1 first 6 iterations and specific columns
 zm[[1]][1:6, c("a", "b")]
-# The rate of population growth
+# The rate of occupancy
 MCMCvis::MCMCpstr(zm, params = "p_est", func = function(x) quantile(x, c(0.025, 0.5, 0.975))) %>% 
   as.data.frame() %>% 
   dplyr::bind_cols(perim_area_z = perim_area_z) %>% 
@@ -601,6 +597,7 @@ MCMCvis::MCMCpstr(zm, params = "p_est", func = function(x) quantile(x, c(0.025, 
 ```
 
 ### Plot
+
 Plot the data as points. Overlay a line plot of the median and 95% highest posterior density intervals of the predicted probability of occurrence as a function of island perimeter to area ratios ranging from 1-60.
 
 ```{r}
@@ -642,8 +639,163 @@ ggplot(data = .) +
 
 Assume you are interested in 2 islands, one that has a perimeter to area ratio of 10, the other that has a perimeter to area ratio of 20. What is the 95% highest posterior density interval on the difference in the probability of occupancy of the two islands based on the analysis you did above? What is the probability that the difference exceeds 0? Remember that the data are standardized when you do this computation.
 
-```{r}
+### JAGS Model
 
+```{r, eval=FALSE}
+## JAGS Model
+model{
+  # priors
+  a ~ dnorm(0,1E-6)
+  b ~ dnorm(0,1E-6)
+  # likelihood
+  for (i in 1:n) {
+    p[i] <- ilogit(a + b*x[i])
+    y[i] ~ dbern(p[i])
+  }
+  ## quantities of interest
+    # The predicted probability of occupancy
+    for(j in 1:length(perim_area_z)){
+      p_est[j] <- ilogit(a + b*perim_area_z[j])
+    }
+    # different perimeter-area estimates
+    p_x10 <- exp(a + b*x10) / (1 + exp(a + b*x10))
+    p_x20 <- exp(a + b*x20) / (1 + exp(a + b*x20))
+    diff_x10_x20 <- p_x10 - p_x20
+}
+```
+
+### Implement JAGS Model
+
+```{r}
+##################################################################
+# insert JAGS model code into an R script
+##################################################################
+{ # Extra bracket needed only for R markdown files - see answers
+  sink("LizardsJAGS.R") # This is the file name for the jags code
+  cat("
+  model{
+    # priors
+    a ~ dnorm(0,1E-6)
+    b ~ dnorm(0,1E-6)
+    # likelihood
+    for (i in 1:n) {
+      p[i] <- ilogit(a + b*x[i])
+      y[i] ~ dbern(p[i])
+    }
+    ## quantities of interest
+      # The predicted probability of occupancy
+      for(j in 1:length(perim_area_z)){
+        p_est[j] <- ilogit(a + b*perim_area_z[j])
+      }
+      # different perimeter-area estimates
+      p_x10 <- exp(a + b*x10) / (1 + exp(a + b*x10))
+      p_x20 <- exp(a + b*x20) / (1 + exp(a + b*x20))
+      diff_x10_x20 <- p_x10 - p_x20
+  }
+  ", fill = TRUE)
+  sink()
+}
+################################################################
+# implement model
+##################################################################
+# specify the initial conditions for the MCMC chain 
+inits = list(
+  list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+  , list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+  , list(a = runif(n = 1, min = a_min, max = a_max), b = runif(n = 1, min = b_min, max = b_max))
+)
+# specify the data that will be used by your JAGS program
+  #the execution of JAGS is about 5 times faster on double precision than on integers.
+hey_data = list(
+  n = nrow(data_df) # n is required in the JAGS program to index the for structure
+  , x = as.double(data_df$perim_area_ratio_z)
+  , y = as.double(data_df$presence)
+  , perim_area_z = as.double(perim_area_z)
+  , x10 = as.double((10 - mean(data_df$perimeterAreaRatio))/sd(data_df$perimeterAreaRatio))
+  , x20 = as.double((20 - mean(data_df$perimeterAreaRatio))/sd(data_df$perimeterAreaRatio))
+)
+# specify 3 scalars, n.adapt, n.update, and n.iter
+# n.adapt = number of iterations that JAGS will use to choose the sampler 
+  # and to assure optimum mixing of the MCMC chain
+n.adapt = 1000
+# n.update = number of iterations that will be discarded to allow the chain to 
+#   converge before iterations are stored (aka, burn-in)
+n.update = 10000
+# n.iter = number of iterations that will be stored in the 
+  # final chain as samples from the posterior distribution
+n.iter = 10000
+######################
+# Call to JAGS
+######################
+jm = rjags::jags.model(
+  file = "LizardsJAGS.R"
+  , data = hey_data
+  , inits = inits
+  , n.chains = length(inits)
+  , n.adapt = n.adapt
+)
+stats::update(jm, n.iter = n.update)
+# save the coda object (more precisely, an mcmc.list object) to R as "zm"
+zm = rjags::coda.samples(
+  model = jm
+  , variable.names = c("a", "b", "p_est", "p_x10", "p_x20", "diff_x10_x20")
+  , n.iter = n.iter
+  , n.thin = 1
+)
+#####################
+# check output
+#####################
+# summary
+MCMCvis::MCMCsummary(zm, params = c("p_x10", "p_x20", "diff_x10_x20"))
+# chain 1 first 6 iterations and specific columns
+zm[[1]][1:6, c("a", "b", "p_x10", "p_x20", "diff_x10_x20")]
+# The rate of occupancy
+MCMCvis::MCMCpstr(zm, params = "p_est", func = function(x) quantile(x, c(0.025, 0.5, 0.975))) %>% 
+  as.data.frame() %>% 
+  dplyr::bind_cols(perim_area_z = perim_area_z) %>% 
+  dplyr::slice_head(n = 6)
+
+```
+
+### Plot
+
+```{r}
+# extract data
+temp_dta <- MCMCvis::MCMCchains(zm, params = c("a", "b", "p_x10", "p_x20", "diff_x10_x20")) %>% 
+  as.data.frame()
+
+# the marginal posterior density of N at the maximum population growth rate
+  # plot
+  ggplot(data = temp_dta, mapping = aes(x = diff_x10_x20)) +
+  geom_histogram(
+    aes(y = ..density..)
+    , bins = 100
+    , fill = "navy"
+    , alpha = 0.8
+    , color = "gray25"
+  ) +
+  geom_density(
+    aes(y = ..density..)
+    , linetype = 2
+    , lwd = 1.2
+    , color = "gray80"
+  ) +
+  geom_vline(
+    xintercept = HDInterval::hdi(temp_dta$diff_x10_x20, credMass = 0.95)
+    , color = "firebrick"
+    , linetype = "dashed"
+    , lwd = 1.1
+  ) +
+  scale_x_continuous(breaks = scales::extended_breaks(n=9)) +
+  xlab("difference in Pr(occupancy) at PA = 10 vs. PA = 20") +
+  ylab("Density") +
+  labs(
+    title = "Difference in Pr(occupancy)"
+    , subtitle = "Perimeter-Area ratio = 10 vs. Perimeter-Area ratio = 20"
+    , caption = "95% highest posterior density interval shown in red"
+  ) +
+  theme_bw()
+remove(temp_dta)
 ```
 
 ## Question 7
