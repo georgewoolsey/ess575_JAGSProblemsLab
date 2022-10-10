@@ -658,8 +658,8 @@ model{
       p_est[j] <- ilogit(a + b*perim_area_z[j])
     }
     # different perimeter-area estimates
-    p_x10 <- exp(a + b*x10) / (1 + exp(a + b*x10))
-    p_x20 <- exp(a + b*x20) / (1 + exp(a + b*x20))
+    p_x10 <- ilogit(a + b*x10)
+    p_x20 <- ilogit(a + b*x20)
     diff_x10_x20 <- p_x10 - p_x20
 }
 ```
@@ -688,8 +688,8 @@ model{
         p_est[j] <- ilogit(a + b*perim_area_z[j])
       }
       # different perimeter-area estimates
-      p_x10 <- exp(a + b*x10) / (1 + exp(a + b*x10))
-      p_x20 <- exp(a + b*x20) / (1 + exp(a + b*x20))
+      p_x10 <- ilogit(a + b*x10)
+      p_x20 <- ilogit(a + b*x20)
       diff_x10_x20 <- p_x10 - p_x20
   }
   ", fill = TRUE)
@@ -763,6 +763,8 @@ MCMCvis::MCMCpstr(zm, params = "p_est", func = function(x) quantile(x, c(0.025, 
 # extract data
 temp_dta <- MCMCvis::MCMCchains(zm, params = c("a", "b", "p_x10", "p_x20", "diff_x10_x20")) %>% 
   as.data.frame()
+temp_hdi <- HDInterval::hdi(temp_dta$diff_x10_x20, credMass = 0.95)
+temp_p_gt0 <- 1 - ecdf(temp_dta$diff_x10_x20)(0)
 
 # the marginal posterior density of N at the maximum population growth rate
   # plot
@@ -778,10 +780,10 @@ temp_dta <- MCMCvis::MCMCchains(zm, params = c("a", "b", "p_x10", "p_x20", "diff
     aes(y = ..density..)
     , linetype = 2
     , lwd = 1.2
-    , color = "gray80"
+    , color = "gray10"
   ) +
   geom_vline(
-    xintercept = HDInterval::hdi(temp_dta$diff_x10_x20, credMass = 0.95)
+    xintercept = temp_hdi
     , color = "firebrick"
     , linetype = "dashed"
     , lwd = 1.1
@@ -795,8 +797,23 @@ temp_dta <- MCMCvis::MCMCchains(zm, params = c("a", "b", "p_x10", "p_x20", "diff
     , caption = "95% highest posterior density interval shown in red"
   ) +
   theme_bw()
-remove(temp_dta)
+  
 ```
+
+### Short Answer
+
+What is the 95% highest posterior density interval on the difference in the probability of occupancy of the two islands based on the analysis you did above? What is the probability that the difference exceeds 0?
+
+\textcolor{violet}{The 95\% highest posterior density interval on the difference in the probability of occupancy of the two islands (PA = 10 vs. PA = 20) is between} **`r scales::comma(temp_hdi[1], accuracy = 0.001)`** \textcolor{violet}{ and } **`r scales::comma(temp_hdi[2], accuracy = 0.001)`**
+
+\textcolor{violet}{The probability that the difference in the probability of occupancy between the two islands (PA = 10 vs. PA = 20) exceeds 0 is: } **`r scales::comma(temp_p_gt0, accuracy = 0.001)`**
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, include=FALSE}
+remove(list = ls()[grep("temp_",ls())])
+gc()
+```
+
 
 ## Question 7
 
@@ -806,5 +823,5 @@ What fundamentally important source of error are we sweeping under the rug in al
 
 ```
 
-\textcolor{violet}{We can be 95% confident that the true value of the random variable falls between the upper and lower limits.}
+\textcolor{violet}{We can be 95\% confident that the true value of the random variable falls between the upper and lower limits.}
 
