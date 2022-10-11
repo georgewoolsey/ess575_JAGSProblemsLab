@@ -194,27 +194,6 @@ MCMCvis::MCMCpstr(zm, params = "pop_grwth_rt", func = function(x) quantile(x, c(
   dplyr::slice_head(n = 6)
 ```
 
-
-```{r, include=FALSE}
-# the marginal posterior density of N at the maximum population growth rate
-MCMCvis::MCMCchains(zm, params = c("N_max_pop_grwth_rt")) %>% 
-  as.data.frame() %>% 
-  # plot
-  ggplot(data = ., mapping = aes(x = N_max_pop_grwth_rt)) +
-  geom_density(
-    aes(y = ..density..)
-    , linetype = 2
-    , lwd = 1.2
-    , color = "navy"
-  ) +
-  xlab(latex2exp::TeX("$N$ at maximum population growth rate")) +
-  ylab("Density") +
-  labs(
-    title = "Population size where the population growth rate is maximum"
-  ) +
-  theme_bw()
-```
-
 ## Question 2
 
 Plot the median growth rate of the *population* (not the per-capita rate) rate and a 95% highest posterior density interval as a function of $N$. What does this curve tell you about the difficulty of sustaining harvest of populations?
