@@ -919,9 +919,9 @@ Hobbs, N. Thompson, and Mevin B. Hooten. *Bayesian Models : A Statistical Primer
 
 Rerun your analysis using priors on the coefficients that are vague for inference on $p$ based on what you learned in Hobbs and Hooten section 5.4.1 and in the previous exercise. (Be careful to convert variances to precision) Plot the probability of occupancy as a function of perimeter to area ratio using these priors and compare with the plot you obtained in exercise 5, above. You will see that the means of the pi changes and uncertainty about pi increases when you use appropriately vague priors for p.
 
-### Implement JAGS Model
+### JAGS Model
 
-Using a prior variance $\sigma_p^2 = 2.5$ to be much less informative:
+\textcolor{violet}{Using a prior variance $\sigma_p^2 = 2.5$ to be much less informative:}
 
 ```{r, eval=FALSE}
 variance <- 2.5
@@ -944,6 +944,7 @@ model{
 
 ```
 
+### Implement JAGS Model
 
 ```{r}
 ##################################################################
