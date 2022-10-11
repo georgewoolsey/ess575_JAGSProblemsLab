@@ -1,8 +1,8 @@
 
   model{
     # priors
-    a ~ dnorm(0,1E-6)
-    b ~ dnorm(0,1E-6)
+    a ~ dnorm(0,0.4)
+    b ~ dnorm(0,0.4)
     # likelihood
     for (i in 1:n) {
       p[i] <- ilogit(a + b*x[i])
@@ -11,7 +11,7 @@
     ## quantities of interest
       # The predicted probability of occupancy
       for(j in 1:length(perim_area_z)){
-        p_est[j] <- ilogit(a + b*perim_area_z[j])
+        new_p_est[j] <- ilogit(a + b*perim_area_z[j])
       }
   
   }
